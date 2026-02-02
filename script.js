@@ -2087,6 +2087,8 @@ async function saveSuite(event) {
     }
 
     try {
+        let savedSuiteId = null;
+
         if (editingSuiteId) {
             // Save version before updating existing suite
             const existingSuite = testSuites.find(s => s.id === editingSuiteId);
@@ -2098,11 +2100,28 @@ async function saveSuite(event) {
                 );
             }
             await currentStorage.updateSuite(editingSuiteId, suite);
+            savedSuiteId = editingSuiteId;
             showMessage("Test suite updated successfully", 'success');
         } else {
-            await currentStorage.saveSuite(suite);
+            savedSuiteId = await currentStorage.saveSuite(suite);
             showMessage("Test suite created successfully", 'success');
+
+            // If graph view was active when creating this test, add it as a node
+            if (window._graphViewActiveForNewTest && window.visualEditor && savedSuiteId) {
+                // Find the saved suite from the updated list
+                const savedSuite = testSuites.find(s => s.id === savedSuiteId) || { id: savedSuiteId, name: suite.name };
+                window.visualEditor.addTestNode(savedSuite);
+
+                // Also refresh the available suites list in the sidebar
+                if (window.testSuites) {
+                    window.visualEditor.setAvailableSuites(window.testSuites);
+                }
+            }
         }
+
+        // Clear the graph view flag
+        window._graphViewActiveForNewTest = false;
+
         closeEditorModal();
     } catch (error) {
         console.error("Save error:", error);
@@ -2520,6 +2539,50 @@ async function executeSuiteCore(suite) {
             } else {
                 throw new Error("Playwright execution is only available in the Desktop App (Electron).");
             }
+        } else if (suite.language === 'security') {
+            // Security Test - run SAST and Secrets scanning
+            if (!window.securityManager) {
+                throw new Error("Security manager not loaded. Please reload the application.");
+            }
+
+            const scanConfig = suite.securityConfig || {};
+            const scanLanguage = scanConfig.scanLanguage || 'javascript';
+            const scanTypes = scanConfig.scanTypes || ['sast', 'secrets'];
+
+            const scanResult = await window.securityManager.runCodeScan(codeToExecute, {
+                language: scanLanguage,
+                scanTypes: scanTypes,
+                name: suite.name
+            });
+
+            // Build output
+            let output = `🔒 Security Scan Results\n`;
+            output += `========================\n\n`;
+            output += `Policy Status: ${scanResult.policyPassed ? '✅ PASSED' : '❌ FAILED'}\n\n`;
+            output += `Vulnerability Summary:\n`;
+            output += `  🔴 Critical: ${scanResult.summary.critical}\n`;
+            output += `  🟠 High: ${scanResult.summary.high}\n`;
+            output += `  🟡 Medium: ${scanResult.summary.medium}\n`;
+            output += `  🟢 Low: ${scanResult.summary.low}\n`;
+            output += `  Total: ${scanResult.summary.total}\n\n`;
+
+            if (scanResult.vulnerabilities && scanResult.vulnerabilities.length > 0) {
+                output += `\nVulnerabilities Found:\n`;
+                output += `----------------------\n`;
+                scanResult.vulnerabilities.forEach((vuln, i) => {
+                    output += `\n${i + 1}. [${vuln.severity}] ${vuln.ruleName || vuln.type}\n`;
+                    output += `   Line ${vuln.line}: ${vuln.description}\n`;
+                    if (vuln.recommendation) {
+                        output += `   Fix: ${vuln.recommendation}\n`;
+                    }
+                });
+            }
+
+            result = {
+                success: scanResult.policyPassed,
+                output: output,
+                error: scanResult.policyPassed ? null : `Found ${scanResult.summary.total} vulnerabilities, policy failed`
+            };
         } else {
             throw new Error(`Unsupported language: ${suite.language}`);
         }
@@ -3631,6 +3694,154 @@ function ensureDemoSuites() {
         };
         testSuites.push(consumerSuite);
         currentStorage.saveSuite(consumerSuite);
+    }
+
+    // ===== SECURITY DEMO SUITES =====
+
+    // Demo: Vulnerable JavaScript
+    const vulnJsId = 'demo_security_vuln_js';
+    const vulnJsIndex = testSuites.findIndex(s => s.id === vulnJsId || s.name === "🔓 Security Demo: Vulnerable JS");
+    if (vulnJsIndex === -1) {
+        const vulnJsSuite = {
+            id: vulnJsId,
+            name: "🔓 Security Demo: Vulnerable JS",
+            description: "JavaScript code with security vulnerabilities. Use Security Testing Center to find issues!",
+            language: "javascript",
+            code: `// ⚠️ Vulnerable JavaScript Code Example
+// Use the Security Testing Center (🔒 button) to scan this code!
+
+const password = "supersecret123";
+const apiKey = "AKIAIOSFODNN7EXAMPLE";
+
+function processUserInput(input) {
+    eval(input);  // Code injection vulnerability
+    document.innerHTML = input;  // XSS vulnerability
+    document.write('<script>' + input + '</script>');
+}
+
+const db = "mongodb://admin:password@db.example.com:27017";
+exec(\`rm -rf \${userInput}\`);  // Command injection
+
+console.log("This code has multiple security issues!");`,
+            tags: ["demo", "security", "vulnerable"],
+            last_run_status: "NEVER_RUN"
+        };
+        testSuites.push(vulnJsSuite);
+        currentStorage.saveSuite(vulnJsSuite);
+    }
+
+    // Demo: Vulnerable Python
+    const vulnPyId = 'demo_security_vuln_py';
+    const vulnPyIndex = testSuites.findIndex(s => s.id === vulnPyId || s.name === "🔓 Security Demo: Vulnerable Python");
+    if (vulnPyIndex === -1) {
+        const vulnPySuite = {
+            id: vulnPyId,
+            name: "🔓 Security Demo: Vulnerable Python",
+            description: "Python code with security vulnerabilities. Use Security Testing Center to find issues!",
+            language: "python",
+            code: `# ⚠️ Vulnerable Python Code Example
+# Use the Security Testing Center (🔒 button) to scan this code!
+
+password = "admin123"
+api_key = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456"
+
+def run_user_code(code):
+    exec(code)  # Code execution vulnerability
+    eval(user_input)  # Eval vulnerability
+
+import subprocess
+subprocess.call(cmd, shell=True)  # Shell injection
+
+import pickle
+data = pickle.loads(user_data)  # Unsafe deserialization
+
+print("This code has multiple security issues!")`,
+            tags: ["demo", "security", "vulnerable"],
+            last_run_status: "NEVER_RUN"
+        };
+        testSuites.push(vulnPySuite);
+        currentStorage.saveSuite(vulnPySuite);
+    }
+
+    // Demo: Secure JavaScript
+    const secureJsId = 'demo_security_secure_js';
+    const secureJsIndex = testSuites.findIndex(s => s.id === secureJsId || s.name === "🔒 Security Demo: Secure JS");
+    if (secureJsIndex === -1) {
+        const secureJsSuite = {
+            id: secureJsId,
+            name: "🔒 Security Demo: Secure JS",
+            description: "Secure JavaScript code that passes security scans. Compare with the vulnerable version!",
+            language: "javascript",
+            code: `// ✅ Secure JavaScript Code Example
+// This code should pass the Security Testing Center scan!
+
+const config = {
+    apiEndpoint: process.env.API_URL,
+    timeout: 5000
+};
+
+function processUserInput(input) {
+    // Sanitize input before use
+    const sanitized = DOMPurify.sanitize(input);
+    element.textContent = sanitized;  // Safe - uses textContent
+}
+
+function calculateTotal(items) {
+    return items.reduce((sum, item) => sum + item.price, 0);
+}
+
+async function fetchData(url) {
+    const response = await fetch(url);
+    return response.json();
+}
+
+console.log("Application started - secure code!");`,
+            tags: ["demo", "security", "secure"],
+            last_run_status: "NEVER_RUN"
+        };
+        testSuites.push(secureJsSuite);
+        currentStorage.saveSuite(secureJsSuite);
+    }
+
+    // Demo: Secure Python
+    const securePyId = 'demo_security_secure_py';
+    const securePyIndex = testSuites.findIndex(s => s.id === securePyId || s.name === "🔒 Security Demo: Secure Python");
+    if (securePyIndex === -1) {
+        const securePySuite = {
+            id: securePyId,
+            name: "🔒 Security Demo: Secure Python",
+            description: "Secure Python code that passes security scans. Compare with the vulnerable version!",
+            language: "python",
+            code: `# ✅ Secure Python Code Example
+# This code should pass the Security Testing Center scan!
+
+import os
+import json
+import subprocess
+
+def get_config():
+    api_key = os.environ.get("API_KEY")
+    return {"key": api_key}
+
+def process_data(items):
+    total = sum(item["price"] for item in items)
+    return {"total": total}
+
+def run_command(args_list):
+    # Safe - using list instead of shell=True
+    result = subprocess.run(args_list, capture_output=True)
+    return result.stdout
+
+def load_data(filepath):
+    with open(filepath, 'r') as f:
+        return json.load(f)  # Safe - using json instead of pickle
+
+print("Application ready - secure code!")`,
+            tags: ["demo", "security", "secure"],
+            last_run_status: "NEVER_RUN"
+        };
+        testSuites.push(securePySuite);
+        currentStorage.saveSuite(securePySuite);
     }
 
     renderTestSuites(testSuites);

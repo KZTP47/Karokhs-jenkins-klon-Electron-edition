@@ -2,14 +2,14 @@
   "name": "copy-of-copy-of-lvx-machina---automated-test-manager",
   "private": true,
   "version": "0.0.0",
-  "version": "0.0.0",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node visual-editor.test.js"
   },
   "build": {
     "appId": "com.alstom.lvx-machina",
@@ -30,6 +30,7 @@
     "@types/node": "^22.14.0",
     "electron": "^40.1.0",
     "electron-builder": "^26.4.0",
+    "jest": "^30.2.0",
     "playwright": "^1.58.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

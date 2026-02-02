@@ -348,6 +348,208 @@ LVX-Machina Test Automation
     _generateId() {
         return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
+
+    // ============================================
+    // SECURITY SCAN NOTIFICATIONS
+    // ============================================
+
+    // Send security scan notification to all enabled integrations
+    async sendSecurityNotification(scanResults) {
+        const integrations = this.getEnabledIntegrations();
+
+        if (integrations.length === 0) {
+            console.log('No enabled integrations to notify');
+            return { success: 0, failed: 0 };
+        }
+
+        const results = await Promise.allSettled(
+            integrations.map(integration => this._sendSecurityToIntegration(integration, scanResults))
+        );
+
+        const success = results.filter(r => r.status === 'fulfilled').length;
+        const failed = results.filter(r => r.status === 'rejected').length;
+
+        console.log(`Security notifications sent: ${success} succeeded, ${failed} failed`);
+
+        return { success, failed, results };
+    }
+
+    // Send security notification to specific integration
+    async _sendSecurityToIntegration(integration, scanResults) {
+        console.log(`Sending security notification via ${integration.type}...`);
+
+        try {
+            let result;
+            switch (integration.type) {
+                case 'slack':
+                    result = await this._sendSlackSecurityNotification(integration, scanResults);
+                    break;
+                case 'discord':
+                    result = await this._sendDiscordSecurityNotification(integration, scanResults);
+                    break;
+                case 'webhook':
+                    result = await this._sendWebhookSecurityNotification(integration, scanResults);
+                    break;
+                default:
+                    throw new Error(`Unknown integration type: ${integration.type}`);
+            }
+            return result;
+        } catch (error) {
+            console.error(`Security notification failed for ${integration.type}:`, error);
+            throw error;
+        }
+    }
+
+    // Slack security notification
+    async _sendSlackSecurityNotification(integration, scanResults) {
+        const webhook = integration.webhookUrl;
+        if (!webhook) throw new Error('Slack webhook URL not configured');
+
+        const { summary, policyPassed, vulnerabilities } = scanResults;
+        const critical = summary?.critical || 0;
+        const high = summary?.high || 0;
+        const medium = summary?.medium || 0;
+        const low = summary?.low || 0;
+        const total = critical + high + medium + low;
+
+        const color = critical > 0 ? '#dc2626' : high > 0 ? '#f97316' : medium > 0 ? '#eab308' : '#22c55e';
+        const emoji = policyPassed ? '✅' : '❌';
+        const status = policyPassed ? 'Passed' : 'Failed';
+
+        const message = {
+            username: 'LVX-Machina Security',
+            icon_emoji: ':shield:',
+            attachments: [{
+                color: color,
+                title: `${emoji} Security Scan: ${status}`,
+                fields: [
+                    { title: '🔴 Critical', value: String(critical), short: true },
+                    { title: '🟠 High', value: String(high), short: true },
+                    { title: '🟡 Medium', value: String(medium), short: true },
+                    { title: '🟢 Low', value: String(low), short: true },
+                    { title: 'Total Vulnerabilities', value: String(total), short: true },
+                    { title: 'Policy Status', value: status, short: true }
+                ],
+                footer: 'LVX-Machina Security Testing',
+                ts: Math.floor(Date.now() / 1000)
+            }]
+        };
+
+        // Add top vulnerabilities if any
+        if (vulnerabilities && vulnerabilities.length > 0) {
+            const topVulns = vulnerabilities.slice(0, 3).map(v =>
+                `• [${v.severity}] ${v.ruleName || v.type}: ${v.description?.substring(0, 50) || 'No description'}...`
+            ).join('\n');
+            message.attachments[0].fields.push({
+                title: 'Top Issues',
+                value: topVulns,
+                short: false
+            });
+        }
+
+        const response = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(message)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Slack notification failed: ${response.statusText}`);
+        }
+
+        return { success: true, integration: 'slack' };
+    }
+
+    // Discord security notification
+    async _sendDiscordSecurityNotification(integration, scanResults) {
+        const webhook = integration.webhookUrl;
+        if (!webhook) throw new Error('Discord webhook URL not configured');
+
+        const { summary, policyPassed, vulnerabilities } = scanResults;
+        const critical = summary?.critical || 0;
+        const high = summary?.high || 0;
+        const medium = summary?.medium || 0;
+        const low = summary?.low || 0;
+        const total = critical + high + medium + low;
+
+        const color = critical > 0 ? 0xdc2626 : high > 0 ? 0xf97316 : medium > 0 ? 0xeab308 : 0x22c55e;
+        const emoji = policyPassed ? '✅' : '❌';
+        const status = policyPassed ? 'Passed' : 'Failed';
+
+        const message = {
+            username: 'LVX-Machina Security',
+            embeds: [{
+                title: `${emoji} Security Scan: ${status}`,
+                color: color,
+                fields: [
+                    { name: '🔴 Critical', value: String(critical), inline: true },
+                    { name: '🟠 High', value: String(high), inline: true },
+                    { name: '🟡 Medium', value: String(medium), inline: true },
+                    { name: '🟢 Low', value: String(low), inline: true },
+                    { name: 'Total', value: String(total), inline: true },
+                    { name: 'Policy', value: status, inline: true }
+                ],
+                footer: { text: 'LVX-Machina Security Testing' },
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        // Add top vulnerabilities if any
+        if (vulnerabilities && vulnerabilities.length > 0) {
+            const topVulns = vulnerabilities.slice(0, 3).map(v =>
+                `• **[${v.severity}]** ${v.ruleName || v.type}`
+            ).join('\n');
+            message.embeds[0].fields.push({
+                name: '🔥 Top Issues',
+                value: topVulns,
+                inline: false
+            });
+        }
+
+        const response = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(message)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Discord notification failed: ${response.statusText}`);
+        }
+
+        return { success: true, integration: 'discord' };
+    }
+
+    // Webhook security notification
+    async _sendWebhookSecurityNotification(integration, scanResults) {
+        const webhook = integration.webhookUrl;
+        if (!webhook) throw new Error('Webhook URL not configured');
+
+        const payload = {
+            event: 'security_scan_completed',
+            timestamp: new Date().toISOString(),
+            security: {
+                policyPassed: scanResults.policyPassed,
+                summary: scanResults.summary,
+                vulnerabilities: scanResults.vulnerabilities?.slice(0, 10), // Limit to 10
+                duration: scanResults.duration
+            }
+        };
+
+        const response = await fetch(webhook, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'LVX-Machina/1.0'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Webhook notification failed: ${response.statusText}`);
+        }
+
+        return { success: true, integration: 'webhook' };
+    }
 }
 
 // Export

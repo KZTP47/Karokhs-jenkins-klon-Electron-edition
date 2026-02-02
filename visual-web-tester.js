@@ -780,8 +780,29 @@ async function vwt_saveSuite() {
   }
   const suiteData = { name: suiteName, description: suiteDescription, language: 'website', code: vwt_generateRobotCode(), vwt_steps_json: JSON.stringify(vwt_steps), website_method: 'upload', website_html_content: vwt_files.html, website_css_contents: vwt_files.css, website_js_contents: vwt_files.js, view_id: suiteViewId, parameters: [], input_files: [], log_config: { enabled: true, format: 'html', save_trigger: 'always' } };
   try {
-    if (vwt_editingSuiteId) { const existingSuite = testSuites.find(s => s.id === vwt_editingSuiteId); await currentStorage.updateSuite(vwt_editingSuiteId, { ...existingSuite, ...suiteData }); showMessage("Test suite updated!", 'success'); }
-    else { await currentStorage.saveSuite(suiteData); showMessage("Test suite saved!", 'success'); }
+    if (vwt_editingSuiteId) {
+      const existingSuite = testSuites.find(s => s.id === vwt_editingSuiteId);
+      await currentStorage.updateSuite(vwt_editingSuiteId, { ...existingSuite, ...suiteData });
+      showMessage("Test suite updated!", 'success');
+    } else {
+      const savedSuiteId = await currentStorage.saveSuite(suiteData);
+      showMessage("Test suite saved!", 'success');
+
+      // If graph view was active when creating this test, add it as a node
+      if (window._graphViewActiveForNewTest && window.visualEditor && savedSuiteId) {
+        const savedSuite = testSuites.find(s => s.id === savedSuiteId) || { id: savedSuiteId, name: suiteName };
+        window.visualEditor.addTestNode(savedSuite);
+
+        // Also refresh the available suites list in the sidebar
+        if (window.testSuites) {
+          window.visualEditor.setAvailableSuites(window.testSuites);
+        }
+      }
+    }
+
+    // Clear the graph view flag
+    window._graphViewActiveForNewTest = false;
+
     closeVisualWebTester();
   } catch (error) { showMessage(`Error saving suite: ${error.message}`, 'error'); }
 }

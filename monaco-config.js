@@ -5,22 +5,28 @@
 
 let monacoEditorInstance = null;
 let monacoLoaded = false;
+let monacoConfigured = false;
 
 /**
  * Initialize Monaco Editor loader and configure AMD
  */
 function loadMonacoEditor() {
     return new Promise((resolve, reject) => {
-        if (monacoLoaded) {
+        // If Monaco is already loaded, resolve immediately
+        if (monacoLoaded && typeof monaco !== 'undefined') {
             resolve();
             return;
         }
 
-        require.config({
-            paths: {
-                'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs'
-            }
-        });
+        // Only configure require.config once to prevent duplicate module warnings
+        if (!monacoConfigured) {
+            monacoConfigured = true;
+            require.config({
+                paths: {
+                    'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs'
+                }
+            });
+        }
 
         require(['vs/editor/editor.main'], function () {
             monacoLoaded = true;

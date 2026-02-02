@@ -847,3 +847,161 @@ body {
 .ve-zoom-controls button:hover {
     background: #f5f5f5;
 }
+
+/* ============================================
+   SECURITY TESTING CENTER STYLES
+   ============================================ */
+
+/* Security Tab Buttons */
+.security-tab-btn {
+    transition: all 0.2s ease;
+}
+
+.security-tab-btn.active {
+    background: linear-gradient(180deg, #64B5F6 0%, #42A5F5 50%, #2196F3 100%) !important;
+    border: 1px solid #1E88E5 !important;
+    color: #FFFFFF !important;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+/* Security Vulnerability Cards */
+.security-vuln-card {
+    transition: all 0.2s ease;
+}
+
+.security-vuln-card:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Severity Border Classes */
+.border-critical {
+    border-left-color: #dc2626 !important;
+}
+
+.border-high {
+    border-left-color: #f97316 !important;
+}
+
+.border-medium {
+    border-left-color: #eab308 !important;
+}
+
+.border-low {
+    border-left-color: #22c55e !important;
+}
+
+/* Security Code Display */
+.security-code-snippet {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85rem;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Security Stats Cards */
+.security-stat-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.security-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* Policy Status Indicators */
+.policy-passed {
+    border-left: 4px solid #22c55e;
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.1) 0%, transparent 100%);
+}
+
+.policy-failed {
+    border-left: 4px solid #dc2626;
+    background: linear-gradient(90deg, rgba(220, 38, 38, 0.1) 0%, transparent 100%);
+}
+
+/* Security History Items */
+.security-history-item {
+    transition: all 0.2s ease;
+}
+
+.security-history-item:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Animated Scan Progress */
+@keyframes security-scan-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.security-scanning {
+    animation: security-scan-pulse 1.5s ease-in-out infinite;
+}
+
+/* Security Badge Styles */
+.security-badge-critical {
+    background: linear-gradient(180deg, #fca5a5 0%, #f87171 100%);
+    color: #7f1d1d;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.security-badge-high {
+    background: linear-gradient(180deg, #fed7aa 0%, #fdba74 100%);
+    color: #7c2d12;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.security-badge-medium {
+    background: linear-gradient(180deg, #fef08a 0%, #facc15 100%);
+    color: #713f12;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.security-badge-low {
+    background: linear-gradient(180deg, #bbf7d0 0%, #86efac 100%);
+    color: #14532d;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Security Code Snippet Boxes */
+.security-vuln-card pre,
+.security-vuln-card code,
+.security-vuln-card .code-snippet,
+#security-results-container pre,
+#security-results-container code {
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Ensure any box with dark gradient has white text */
+.bg-gradient-to-r code,
+[style*="linear-gradient"] code,
+[style*="linear-gradient"] pre {
+    color: #ffffff !important;
+}

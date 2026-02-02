@@ -562,19 +562,76 @@ function openVisualPipelineEditor(pipelineId = null) {
     if (pipelineId) {
         const pipeline = pipelines.find(p => p.id === pipelineId);
         if (pipeline && pipeline.type === 'graph') {
-            window.visualEditor.loadGraph({ nodes: pipeline.nodes, edges: pipeline.edges });
+            window.visualEditor.loadGraph({ nodes: pipeline.nodes || [], edges: pipeline.edges || [] });
             window._editingGraphPipelineId = pipelineId;
+        } else {
+            // Pipeline exists but is not a graph type - show empty canvas
+            window.visualEditor.render();
+            window._editingGraphPipelineId = null;
         }
     } else {
+        // New pipeline - ensure empty canvas is rendered
+        window.visualEditor.render();
         window._editingGraphPipelineId = null;
     }
 
-    // Hook Save
+    // Hook Save (to current graph) - saves directly if editing, prompts if new
     window.visualEditor.onSave = (graphData) => {
-        window.showInputModal("Enter Pipeline Name", "My Graph Pipeline", (name) => {
+        const existingId = window._editingGraphPipelineId;
+
+        if (existingId) {
+            // Editing existing pipeline - save directly without prompting for name
+            const existingPipeline = pipelines.find(p => p.id === existingId);
+            const pipeline = {
+                id: existingId,
+                name: existingPipeline ? existingPipeline.name : 'Graph Pipeline',
+                type: 'graph',
+                nodes: graphData.nodes,
+                edges: graphData.edges,
+                lastRun: existingPipeline ? existingPipeline.lastRun : null,
+                lastStatus: existingPipeline ? existingPipeline.lastStatus : 'NEVER_RUN'
+            };
+
+            const idx = pipelines.findIndex(p => p.id === existingId);
+            if (idx !== -1) pipelines[idx] = pipeline;
+
+            savePipelines();
+            renderPipelinesList();
+            root.classList.add('hidden');
+            window.showMessage("Graph Pipeline Saved", "success");
+        } else {
+            // New pipeline - prompt for name
+            window.showInputModal("Enter Pipeline Name", "My Graph Pipeline", (name) => {
+                if (!name) return;
+
+                const id = 'pipe_graph_' + Date.now();
+                const pipeline = {
+                    id: id,
+                    name: name,
+                    type: 'graph',
+                    nodes: graphData.nodes,
+                    edges: graphData.edges,
+                    lastRun: null,
+                    lastStatus: 'NEVER_RUN'
+                };
+
+                pipelines.push(pipeline);
+                window._editingGraphPipelineId = id; // Set as current editing
+
+                savePipelines();
+                renderPipelinesList();
+                root.classList.add('hidden');
+                window.showMessage("Graph Pipeline Created", "success");
+            });
+        }
+    };
+
+    // Hook Save As (always creates new graph with new name)
+    window.visualEditor.onSaveAs = (graphData) => {
+        window.showInputModal("Enter Name for New Pipeline", "My Graph Pipeline Copy", (name) => {
             if (!name) return;
 
-            const id = window._editingGraphPipelineId || 'pipe_graph_' + Date.now();
+            const id = 'pipe_graph_' + Date.now();
             const pipeline = {
                 id: id,
                 name: name,
@@ -585,17 +642,13 @@ function openVisualPipelineEditor(pipelineId = null) {
                 lastStatus: 'NEVER_RUN'
             };
 
-            // Update or Push
-            const idx = pipelines.findIndex(p => p.id === id);
-            if (idx !== -1) pipelines[idx] = pipeline;
-            else pipelines.push(pipeline);
+            pipelines.push(pipeline);
+            window._editingGraphPipelineId = id; // Now editing this new pipeline
 
             savePipelines();
             renderPipelinesList();
-
-            // Close
             root.classList.add('hidden');
-            window.showMessage("Graph Pipeline Saved", "success");
+            window.showMessage("Graph Pipeline Saved as New", "success");
         });
     };
 
@@ -642,6 +695,30 @@ function openVisualPipelineEditor(pipelineId = null) {
             executeRun(id, name);
         }
     };
+
+    // Hook Create Visual Web Test button - opens the Visual Web Tester modal
+    window.visualEditor.onCreateVisualTest = () => {
+        // Set flag to indicate graph view is active for adding node after save
+        window._graphViewActiveForNewTest = true;
+
+        if (typeof openVisualWebTester === 'function') {
+            openVisualWebTester();
+        } else {
+            window.showMessage("Visual Web Tester not available", "error");
+        }
+    };
+
+    // Hook Add New Test Suite button - opens the Add Suite modal
+    window.visualEditor.onAddTestSuite = () => {
+        // Set flag to indicate graph view is active for adding node after save
+        window._graphViewActiveForNewTest = true;
+
+        if (typeof openAddSuiteModal === 'function') {
+            openAddSuiteModal();
+        } else {
+            window.showMessage("Add Suite modal not available", "error");
+        }
+    };
 }
 
 async function runGraphPipeline(pipeline) {
@@ -671,10 +748,252 @@ async function runGraphPipeline(pipeline) {
             consoleOutput.innerHTML += `<span class="text-gray-300">Running Node: ${node.data.name}...</span><br>`;
             window.currentPipelineExecutionLog += `Running Node: ${node.data.name}...\n`;
 
-            // Execute the suite
-            // We use runTestSuite from window (assuming it's available globally from visual-web-tester.js or unit-testing.js logic)
-            // But wait, runTestSuite might not be exposed or return what we want.
-            // Let's assume window.runTestSuite works as in the linear runner.
+            // Handle special node types
+            const nodeType = node.type || node.data.type || 'test-suite';
+
+            // Git Repo node
+            if (nodeType === 'git-repo') {
+                consoleOutput.innerHTML += `<span class="text-orange-400">  📦 Cloning Git Repository...</span><br>`;
+                window.currentPipelineExecutionLog += `  📦 Cloning Git Repository...\n`;
+
+                let repoUrl = node.data.repoUrl;
+                const branch = node.data.branch || 'main';
+                const auth = node.data.auth;
+
+                // Runtime Sanitization: Strip /tree/ or /blob/ and branch segments if still present
+                if (repoUrl && repoUrl.includes('github.com')) {
+                    const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)\/(blob|tree)\/([^\/]+)/);
+                    if (match) {
+                        const cleanUrl = `https://github.com/${match[1]}/${match[2]}`;
+                        console.log(`[Runtime] Auto-corrected Git URL: ${repoUrl} -> ${cleanUrl}`);
+                        repoUrl = cleanUrl;
+                    }
+                }
+
+                if (!repoUrl) {
+                    return { status: 'FAILURE', message: 'No Repository URL configured' };
+                }
+
+                try {
+                    const result = await window.electronAPI.gitOps.clone(repoUrl, branch, auth);
+                    consoleOutput.innerHTML += `<span class="text-green-400">  ✓ Cloned to ${result.path}</span><br>`;
+                    window.currentPipelineExecutionLog += `  ✓ Cloned to ${result.path}\n`;
+
+                    return {
+                        status: 'SUCCESS',
+                        message: `Cloned ${repoUrl}`,
+                        artifacts: {
+                            repoPath: result.path,
+                            source: 'git'
+                        }
+                    };
+                } catch (err) {
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ✗ Clone Failed: ${err.message}</span><br>`;
+                    return { status: 'FAILURE', message: `Clone Failed: ${err.message}` };
+                }
+            }
+
+            // Unit Test Runner node
+            if (nodeType === 'unit-test-runner') {
+                consoleOutput.innerHTML += `<span class="text-purple-400">  🧪 Running Unit Tests...</span><br>`;
+                window.currentPipelineExecutionLog += `  🧪 Running Unit Tests...\n`;
+
+                const repoPath = inputs?.repoPath || inputs?.artifacts?.repoPath;
+                if (!repoPath) {
+                    const msg = 'No repository path found. Ensure a Git Repo node is connected upstream.';
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ✗ ${msg}</span><br>`;
+                    return { status: 'FAILURE', message: msg };
+                }
+
+                const cmd = node.data.command || 'npm test';
+
+                // INJECT TEST CODE IF PRESENT
+                if (node.data.testCode && node.data.testFilename) {
+                    consoleOutput.innerHTML += `<span class="text-blue-300">  💾 Injecting test file: ${node.data.testFilename}...</span><br>`;
+                    window.currentPipelineExecutionLog += `  💾 Injecting test file: ${node.data.testFilename}...\n`;
+
+                    try {
+                        const filePathsToInject = node.data.testFilename.includes('/') || node.data.testFilename.includes('\\')
+                            ? node.data.testFilename
+                            : node.data.testFilename; // Should handle path joining in backend if needed, but for now assuming root
+
+                        // We need to join repoPath + filename safely. 
+                        // Since we can't import 'path' module here easily in browser context without require, 
+                        // we'll let the backend handle the full path construction or do simple string concat if OS specific separator known.
+                        // Better approach: Pass repoPath and filename separately to a new fileOps function? 
+                        // Or just concat with '/' since Windows handles mixed separators usually fine in Node/Electron.
+
+                        const fullPath = repoPath + (repoPath.endsWith('\\') || repoPath.endsWith('/') ? '' : (repoPath.includes('\\') ? '\\' : '/')) + node.data.testFilename;
+
+                        await window.electronAPI.fileOps.writeFile(fullPath, node.data.testCode);
+                    } catch (injectErr) {
+                        consoleOutput.innerHTML += `<span class="text-red-400">  ❌ Injection Failed: ${injectErr.message}</span><br>`;
+                        return { status: 'FAILURE', message: `Injection Failed: ${injectErr.message}` };
+                    }
+                }
+
+                consoleOutput.innerHTML += `<span class="text-gray-300">  > ${cmd}</span><br>`;
+                window.currentPipelineExecutionLog += `  > ${cmd}\n`;
+
+                try {
+                    // Check if sysOps exists (backward compatibility)
+                    if (!window.electronAPI.sysOps) {
+                        throw new Error("System Operations API not available. Restart application.");
+                    }
+
+                    const result = await window.electronAPI.sysOps.runCommand(repoPath, cmd);
+
+                    // Display output
+                    const outputLog = (result.stdout + "\n" + result.stderr).trim();
+                    const outputHtml = outputLog.replace(/\n/g, '<br>').replace(/\s/g, '&nbsp;');
+                    consoleOutput.innerHTML += `<div class="text-xs text-gray-400 font-mono p-2 bg-gray-900 rounded my-2 max-h-60 overflow-auto whitespace-nowrap">${outputHtml}</div>`;
+                    window.currentPipelineExecutionLog += outputLog + "\n";
+
+                    if (result.exitCode === 0) {
+                        consoleOutput.innerHTML += `<span class="text-green-400">  ✅ Tests Passed</span><br>`;
+                        return { status: 'SUCCESS', message: 'Tests Passed', output: result.stdout };
+                    } else {
+                        consoleOutput.innerHTML += `<span class="text-red-400">  ❌ Tests Failed (Exit Code: ${result.exitCode})</span><br>`;
+                        return { status: 'FAILURE', message: 'Tests Failed', output: result.stderr };
+                    }
+                } catch (err) {
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ❌ Execution Error: ${err.message}</span><br>`;
+                    return { status: 'FAILURE', message: err.message };
+                }
+            }
+
+            // Security Scan node
+            if (nodeType === 'security_scan') {
+                consoleOutput.innerHTML += `<span class="text-purple-400">  🔒 Running Security Scan...</span><br>`;
+                window.currentPipelineExecutionLog += `  🔒 Running Security Scan...\n`;
+
+                if (!window.securityManager) {
+                    return { status: 'FAILURE', message: 'Security manager not loaded' };
+                }
+
+                // Get code from previous node outputs or use scan config
+                const scanConfig = node.data.config || {};
+
+                // CHECK FOR INFRASTRUCTURE SCANS
+                if (['docker_container', 'docker_image', 'k8s_yaml', 'network_port'].includes(scanConfig.scanType)) {
+                    const target = inputs?.target || scanConfig.target;
+
+                    if (!target && scanConfig.scanType !== 'k8s_scan_cluster') { // k8s cluster might not need specific target
+                        consoleOutput.innerHTML += `<span class="text-red-400">  ✗ Missing target for ${scanConfig.scanType}</span><br>`;
+                        return { status: 'FAILURE', message: 'Missing target for infrastructure scan' };
+                    }
+
+                    consoleOutput.innerHTML += `<span class="text-blue-300">  🔍 Scanning ${scanConfig.scanType}: ${target}...</span><br>`;
+
+                    const scanResult = await window.securityManager.runInfrastructureScan(target, scanConfig.scanType, {
+                        name: node.data.name
+                    });
+
+                    const vulnCount = scanResult.summary?.total || 0;
+                    consoleOutput.innerHTML += `<span class="text-${vulnCount > 0 ? 'yellow' : 'green'}-400">  Found ${vulnCount} issues</span><br>`;
+                    window.currentPipelineExecutionLog += `  Found ${vulnCount} issues\n`;
+
+                    if (scanResult.error) {
+                        consoleOutput.innerHTML += `<span class="text-red-400">  ✗ Error: ${scanResult.error}</span><br>`;
+                    }
+
+                    return {
+                        status: scanResult.policyPassed ? 'SUCCESS' : 'FAILURE',
+                        message: `Infra scan: ${vulnCount} issues`,
+                        securityResults: scanResult
+                    };
+                }
+
+                // Default: Code Scan
+                let codeToScan = inputs?.code || scanConfig.code || '';
+
+                // If upstream artifact has repoPath, read files from it
+                if (inputs?.repoPath || inputs?.artifacts?.repoPath) {
+                    consoleOutput.innerHTML += `<span class="text-blue-300">  📂 Reading files from cloned repo...</span><br>`;
+                    try {
+                        const repoPath = inputs.repoPath || inputs.artifacts.repoPath;
+                        // For MVP, just read top-level or src .js files? 
+                        // Let's read recursively .js files
+                        const filePaths = await window.electronAPI.fileOps.listFiles(repoPath, 'js');
+                        consoleOutput.innerHTML += `<span class="text-gray-400">    Found ${filePaths.length} JS files.</span><br>`;
+
+                        // Limit to preventing memory boom if huge repo
+                        const limitedFiles = filePaths.slice(0, 50);
+                        if (filePaths.length > 50) {
+                            consoleOutput.innerHTML += `<span class="text-yellow-400">    ⚠ Scanning first 50 files only.</span><br>`;
+                        }
+
+                        for (const fp of limitedFiles) {
+                            const content = await window.electronAPI.fileOps.readFile(fp);
+                            codeToScan += `\n\n// FILE: ${fp.split(/[\\/]/).pop()}\n${content}`;
+                        }
+                    } catch (e) {
+                        consoleOutput.innerHTML += `<span class="text-red-400">    Error reading repo files: ${e.message}</span><br>`;
+                    }
+                }
+
+                if (!codeToScan) {
+                    consoleOutput.innerHTML += `<span class="text-yellow-400">  ⚠ No code to scan</span><br>`;
+                    return { status: 'SUCCESS', message: 'No code to scan', vulnerabilities: [] };
+                }
+
+                const scanResult = await window.securityManager.runCodeScan(codeToScan, {
+                    language: scanConfig.language || 'javascript',
+                    scanTypes: scanConfig.scanTypes || ['sast', 'secrets']
+                });
+
+                const vulnCount = scanResult.summary?.total || 0;
+                consoleOutput.innerHTML += `<span class="text-${vulnCount > 0 ? 'yellow' : 'green'}-400">  Found ${vulnCount} vulnerabilities</span><br>`;
+                window.currentPipelineExecutionLog += `  Found ${vulnCount} vulnerabilities\n`;
+
+                // Send security notification if configured
+                if (window.integrationsManager && scanConfig.notify) {
+                    await window.integrationsManager.sendSecurityNotification(scanResult);
+                }
+
+                return {
+                    status: scanResult.policyPassed ? 'SUCCESS' : 'FAILURE',
+                    message: `Security scan: ${vulnCount} vulnerabilities`,
+                    securityResults: scanResult
+                };
+            }
+
+            // Security Gate node
+            if (nodeType === 'security_gate') {
+                consoleOutput.innerHTML += `<span class="text-orange-400">  🚧 Checking Security Gate...</span><br>`;
+                window.currentPipelineExecutionLog += `  🚧 Checking Security Gate...\n`;
+
+                const gateConfig = node.data.config || {};
+                const maxCritical = gateConfig.maxCritical ?? 0;
+                const maxHigh = gateConfig.maxHigh ?? 5;
+                const maxMedium = gateConfig.maxMedium ?? 20;
+
+                // Gather security results from inputs
+                const securityResults = inputs?.securityResults || context?.lastSecurityResults;
+
+                if (!securityResults) {
+                    consoleOutput.innerHTML += `<span class="text-yellow-400">  ⚠ No security scan results to check</span><br>`;
+                    return { status: 'SUCCESS', message: 'No security results to gate' };
+                }
+
+                const critical = securityResults.summary?.critical || 0;
+                const high = securityResults.summary?.high || 0;
+                const medium = securityResults.summary?.medium || 0;
+
+                const passed = critical <= maxCritical && high <= maxHigh && medium <= maxMedium;
+
+                if (passed) {
+                    consoleOutput.innerHTML += `<span class="text-green-400">  ✓ Security gate PASSED</span><br>`;
+                    window.currentPipelineExecutionLog += `  ✓ Security gate PASSED\n`;
+                    return { status: 'SUCCESS', message: 'Security gate passed' };
+                } else {
+                    consoleOutput.innerHTML += `<span class="text-red-500">  ✗ Security gate FAILED (C:${critical}/${maxCritical}, H:${high}/${maxHigh}, M:${medium}/${maxMedium})</span><br>`;
+                    window.currentPipelineExecutionLog += `  ✗ Security gate FAILED\n`;
+                    return { status: 'FAILURE', message: `Security gate failed: ${critical} critical, ${high} high, ${medium} medium` };
+                }
+            }
+
+            // Default: Execute as test suite
             const suiteResult = await window.runTestSuite(node.data.suiteId, true, inputs);
 
             if (suiteResult.status === 'SUCCESS') {

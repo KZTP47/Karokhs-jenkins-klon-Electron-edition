@@ -631,6 +631,287 @@ function renderSuiteHistoryList(history) {
   `).join('');
 }
 
+// ============================================
+// SECURITY DASHBOARD
+// ============================================
+
+let securityTrendChart = null;
+let securitySeverityChart = null;
+
+// Switch dashboard tabs
+function switchDashboardTab(tab) {
+  const testTab = document.getElementById('dashboard-test-tab');
+  const securityTab = document.getElementById('dashboard-security-tab');
+  const testContent = document.getElementById('dashboard-test-content');
+  const securityContent = document.getElementById('dashboard-security-content');
+
+  if (!testContent || !securityContent) return;
+
+  if (tab === 'test') {
+    testTab.classList.add('active');
+    securityTab.classList.remove('active');
+    testContent.classList.remove('hidden');
+    securityContent.classList.add('hidden');
+    refreshDashboard();
+  } else {
+    testTab.classList.remove('active');
+    securityTab.classList.add('active');
+    testContent.classList.add('hidden');
+    securityContent.classList.remove('hidden');
+    refreshSecurityDashboard();
+  }
+}
+
+// Refresh security dashboard
+function refreshSecurityDashboard() {
+  if (!window.securityManager) {
+    console.warn('Security manager not loaded');
+    return;
+  }
+
+  const stats = window.securityManager.getStatistics();
+  const history = window.securityManager.getHistory();
+
+  renderSecuritySummary(stats);
+  renderSecuritySeverityChart(stats);
+  renderSecurityTrendChart(history);
+  renderTopVulnerabilities(history);
+  renderComplianceScore(stats);
+}
+
+// Render security summary cards
+function renderSecuritySummary(stats) {
+  const totalScans = document.getElementById('sec-stat-total-scans');
+  const totalVulns = document.getElementById('sec-stat-total-vulns');
+  const criticalCount = document.getElementById('sec-stat-critical');
+  const passRate = document.getElementById('sec-stat-pass-rate');
+
+  if (totalScans) totalScans.textContent = stats.totalScans;
+  if (totalVulns) totalVulns.textContent = stats.totalVulnerabilities;
+  if (criticalCount) criticalCount.textContent = stats.bySeverity?.critical || 0;
+
+  if (passRate) {
+    const rate = stats.totalScans > 0
+      ? ((stats.passedScans / stats.totalScans) * 100).toFixed(1)
+      : 0;
+    passRate.textContent = rate + '%';
+
+    // Color based on rate
+    if (parseFloat(rate) >= 80) {
+      passRate.className = 'text-3xl font-bold text-green-600';
+    } else if (parseFloat(rate) >= 50) {
+      passRate.className = 'text-3xl font-bold text-yellow-600';
+    } else {
+      passRate.className = 'text-3xl font-bold text-red-600';
+    }
+  }
+}
+
+// Render severity distribution chart
+function renderSecuritySeverityChart(stats) {
+  const ctx = document.getElementById('security-severity-chart');
+  if (!ctx) return;
+
+  if (securitySeverityChart) {
+    securitySeverityChart.destroy();
+  }
+
+  const bySeverity = stats.bySeverity || { critical: 0, high: 0, medium: 0, low: 0 };
+
+  securitySeverityChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Critical', 'High', 'Medium', 'Low'],
+      datasets: [{
+        data: [bySeverity.critical, bySeverity.high, bySeverity.medium, bySeverity.low],
+        backgroundColor: ['#DC2626', '#F97316', '#EAB308', '#22C55E'],
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom'
+        }
+      }
+    }
+  });
+}
+
+// Render security trend chart
+function renderSecurityTrendChart(history) {
+  const ctx = document.getElementById('security-trend-chart');
+  if (!ctx) return;
+
+  if (securityTrendChart) {
+    securityTrendChart.destroy();
+  }
+
+  // Group by date (last 14 days)
+  const dailyData = new Map();
+  const now = new Date();
+
+  // Initialize last 14 days
+  for (let i = 13; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    dailyData.set(dateStr, { vulnerabilities: 0, scans: 0 });
+  }
+
+  // Aggregate history
+  history.forEach(scan => {
+    const dateStr = new Date(scan.timestamp).toISOString().split('T')[0];
+    if (dailyData.has(dateStr)) {
+      const data = dailyData.get(dateStr);
+      data.scans++;
+      data.vulnerabilities += scan.summary?.total || 0;
+    }
+  });
+
+  const labels = Array.from(dailyData.keys()).map(d =>
+    new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  );
+  const vulnData = Array.from(dailyData.values()).map(d => d.vulnerabilities);
+  const scanData = Array.from(dailyData.values()).map(d => d.scans);
+
+  securityTrendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Vulnerabilities',
+          data: vulnData,
+          borderColor: '#DC2626',
+          backgroundColor: 'rgba(220, 38, 38, 0.1)',
+          tension: 0.3,
+          yAxisID: 'y'
+        },
+        {
+          label: 'Scans',
+          data: scanData,
+          borderColor: '#3B82F6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          tension: 0.3,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
+      scales: {
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          beginAtZero: true,
+          title: { display: true, text: 'Vulnerabilities' }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          beginAtZero: true,
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: 'Scans' }
+        }
+      }
+    }
+  });
+}
+
+// Render top vulnerabilities table
+function renderTopVulnerabilities(history) {
+  const tbody = document.getElementById('top-vulnerabilities-body');
+  if (!tbody) return;
+
+  // Aggregate all vulnerabilities from history
+  const vulnCounts = new Map();
+
+  history.forEach(scan => {
+    if (scan.vulnerabilities && Array.isArray(scan.vulnerabilities)) {
+      scan.vulnerabilities.forEach(vuln => {
+        const key = vuln.ruleId || vuln.type;
+        if (!vulnCounts.has(key)) {
+          vulnCounts.set(key, {
+            ruleId: key,
+            title: vuln.message || vuln.title || key,
+            severity: vuln.severity,
+            count: 0
+          });
+        }
+        vulnCounts.get(key).count++;
+      });
+    }
+  });
+
+  // Sort by count and take top 10
+  const topVulns = Array.from(vulnCounts.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  if (topVulns.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center p-4 aero-text-muted">No vulnerabilities found</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = topVulns.map(vuln => `
+    <tr class='border-b aero-divider hover:bg-blue-50'>
+      <td class='p-2 font-mono text-sm'>${vuln.ruleId}</td>
+      <td class='p-2'>${vuln.title}</td>
+      <td class='p-2'>
+        <span class='security-severity-badge security-severity-${vuln.severity.toLowerCase()}'>
+          ${vuln.severity}
+        </span>
+      </td>
+      <td class='p-2 font-semibold'>${vuln.count}</td>
+    </tr>
+  `).join('');
+}
+
+// Render compliance score widget
+function renderComplianceScore(stats) {
+  const scoreEl = document.getElementById('compliance-score');
+  const gaugeEl = document.getElementById('compliance-gauge');
+
+  if (!scoreEl || !gaugeEl) return;
+
+  // Calculate compliance score based on vulnerabilities
+  // Perfect score = 100, deduct points for each severity
+  let score = 100;
+  const bySeverity = stats.bySeverity || {};
+
+  score -= (bySeverity.critical || 0) * 25;  // Critical: -25 each
+  score -= (bySeverity.high || 0) * 10;      // High: -10 each
+  score -= (bySeverity.medium || 0) * 3;     // Medium: -3 each
+  score -= (bySeverity.low || 0) * 1;        // Low: -1 each
+
+  score = Math.max(0, Math.min(100, score));
+
+  scoreEl.textContent = Math.round(score);
+
+  // Update gauge color
+  if (score >= 80) {
+    scoreEl.className = 'text-4xl font-bold text-green-600';
+    gaugeEl.style.background = `conic-gradient(#22C55E ${score}%, #E5E7EB ${score}%)`;
+  } else if (score >= 50) {
+    scoreEl.className = 'text-4xl font-bold text-yellow-600';
+    gaugeEl.style.background = `conic-gradient(#EAB308 ${score}%, #E5E7EB ${score}%)`;
+  } else {
+    scoreEl.className = 'text-4xl font-bold text-red-600';
+    gaugeEl.style.background = `conic-gradient(#DC2626 ${score}%, #E5E7EB ${score}%)`;
+  }
+}
+
 // Export functions
 window.openReportingDashboard = openReportingDashboard;
 window.closeDashboard = closeDashboard;
@@ -638,3 +919,6 @@ window.refreshDashboard = refreshDashboard;
 window.viewSuiteHistory = viewSuiteHistory;
 window.openSuiteHistoryModal = openSuiteHistoryModal;
 window.closeSuiteHistoryModal = closeSuiteHistoryModal;
+window.switchDashboardTab = switchDashboardTab;
+window.refreshSecurityDashboard = refreshSecurityDashboard;
+

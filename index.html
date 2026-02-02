@@ -84,6 +84,10 @@
               class="aero-button-info py-2 px-4 rounded-lg shadow-lg transition duration-200 flex items-center gap-2">
               🔄 <span id="cicd-status-indicator">CI/CD</span>
             </button>
+            <button onclick="openSecurityModal()"
+              class="aero-button-danger py-2 px-4 rounded-lg shadow-lg transition duration-200 flex items-center gap-2">
+              🔒 Security
+            </button>
             <button onclick="openCollaborationModal()"
               class="aero-button-purple py-2 px-4 rounded-lg shadow-lg transition duration-200 flex items-center gap-2">
               <span>👥</span>
@@ -564,7 +568,7 @@
   </div>
 
   <div id="visual-web-tester-modal"
-    class="hidden fixed inset-0 z-50 flex items-center justify-center aero-modal-backdrop modal-open">
+    class="hidden fixed inset-0 z-[70] flex items-center justify-center aero-modal-backdrop modal-open">
     <div class="aero-modal p-0 w-full max-w-[95vw] h-[90vh] flex flex-col">
       <!-- Resize Handle -->
       <div class="resize-handle-corner"></div>
@@ -752,7 +756,7 @@
   </div>
 
   <div id="suite-modal"
-    class="hidden fixed inset-0 z-50 flex items-center justify-center aero-modal-backdrop modal-open"
+    class="hidden fixed inset-0 z-[70] flex items-center justify-center aero-modal-backdrop modal-open"
     onclick="if (event.target.id === 'suite-modal') closeEditorModal()">
     <div class="aero-modal p-6 sm:p-8 w-full max-w-5xl max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
       <h3 id="modal-title" class="text-3xl font-bold mb-6 aero-text-primary">Add New Test Suite</h3>
@@ -787,6 +791,7 @@
             <option value="robot">Robot Framework</option>
             <option value="website">Website Integration Testing</option>
             <option value="playwright">Playwright (Node.js)</option>
+            <option value="security">🔒 Security Test</option>
           </select>
         </div>
 
@@ -1559,7 +1564,7 @@
     onclick='if(event.target.id==="reporting-dashboard-modal") closeDashboard()'>
     <div class='aero-modal p-6 w-full max-w-7xl max-h-[90vh] flex flex-col' onclick='event.stopPropagation()'>
       <div class='flex justify-between items-center mb-4'>
-        <h3 class='text-2xl font-bold aero-text-primary'>📊 Test Execution Dashboard</h3>
+        <h3 class='text-2xl font-bold aero-text-primary'>📊 Analytics Dashboard</h3>
         <div class='flex gap-2'>
           <select id='dashboard-timeframe' onchange='refreshDashboard()'
             class='aero-button px-3 py-2 rounded-lg text-sm'>
@@ -1573,7 +1578,20 @@
         </div>
       </div>
 
-      <div class='flex-1 overflow-y-auto space-y-4'>
+      <!-- Tab Navigation -->
+      <div class='flex gap-2 mb-4'>
+        <button id='dashboard-test-tab' onclick='switchDashboardTab("test")'
+          class='security-tab-btn active px-4 py-2 rounded-lg aero-button'>
+          🧪 Test Execution
+        </button>
+        <button id='dashboard-security-tab' onclick='switchDashboardTab("security")'
+          class='security-tab-btn px-4 py-2 rounded-lg aero-button'>
+          🔒 Security
+        </button>
+      </div>
+
+      <!-- Test Execution Content -->
+      <div id='dashboard-test-content' class='flex-1 overflow-y-auto space-y-4'>
         <!-- Summary Statistics -->
         <div class='grid grid-cols-4 gap-4'>
           <div class='aero-glass-panel p-4 rounded-lg'>
@@ -1659,6 +1677,85 @@
                 <!-- Populated dynamically -->
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Security Dashboard Content -->
+      <div id='dashboard-security-content' class='hidden flex-1 overflow-y-auto space-y-4'>
+        <!-- Security Summary Statistics -->
+        <div class='grid grid-cols-4 gap-4'>
+          <div class='aero-glass-panel p-4 rounded-lg'>
+            <div class='text-sm aero-text-muted mb-1'>Total Scans</div>
+            <div id='sec-stat-total-scans' class='text-3xl font-bold aero-text-primary'>0</div>
+          </div>
+          <div class='aero-glass-panel p-4 rounded-lg'>
+            <div class='text-sm aero-text-muted mb-1'>Total Vulnerabilities</div>
+            <div id='sec-stat-total-vulns' class='text-3xl font-bold text-red-600'>0</div>
+          </div>
+          <div class='aero-glass-panel p-4 rounded-lg'>
+            <div class='text-sm aero-text-muted mb-1'>Critical Issues</div>
+            <div id='sec-stat-critical' class='text-3xl font-bold text-red-700'>0</div>
+          </div>
+          <div class='aero-glass-panel p-4 rounded-lg'>
+            <div class='text-sm aero-text-muted mb-1'>Pass Rate</div>
+            <div id='sec-stat-pass-rate' class='text-3xl font-bold text-green-600'>0%</div>
+          </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class='grid grid-cols-3 gap-4'>
+          <!-- Severity Distribution Chart -->
+          <div class='aero-glass-panel p-4 rounded-lg'>
+            <h4 class='font-semibold aero-text-secondary mb-3'>Severity Distribution</h4>
+            <div class="relative h-64 w-full">
+              <canvas id='security-severity-chart'></canvas>
+            </div>
+          </div>
+
+          <!-- Security Trend Chart -->
+          <div class='aero-glass-panel p-4 rounded-lg col-span-2'>
+            <h4 class='font-semibold aero-text-secondary mb-3'>Security Trend (14 Days)</h4>
+            <div class="relative h-64 w-full">
+              <canvas id='security-trend-chart'></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compliance Score & Top Vulnerabilities -->
+        <div class='grid grid-cols-3 gap-4'>
+          <!-- Compliance Score -->
+          <div class='aero-glass-panel p-4 rounded-lg'>
+            <h4 class='font-semibold aero-text-secondary mb-3'>🛡️ Compliance Score</h4>
+            <div class='flex flex-col items-center justify-center'>
+              <div id='compliance-gauge' class='w-32 h-32 rounded-full flex items-center justify-center mb-3'
+                style='background: conic-gradient(#22C55E 100%, #E5E7EB 100%);'>
+                <div class='w-24 h-24 rounded-full bg-white flex items-center justify-center'>
+                  <span id='compliance-score' class='text-4xl font-bold text-green-600'>100</span>
+                </div>
+              </div>
+              <div class='text-sm aero-text-muted'>Based on vulnerability impact</div>
+            </div>
+          </div>
+
+          <!-- Top Vulnerabilities -->
+          <div class='aero-glass-panel p-4 rounded-lg col-span-2'>
+            <h4 class='font-semibold aero-text-secondary mb-3'>🔥 Top Vulnerabilities</h4>
+            <div class='overflow-x-auto max-h-64 overflow-y-auto'>
+              <table class='w-full text-sm'>
+                <thead class='sticky top-0 bg-white'>
+                  <tr class='border-b aero-divider'>
+                    <th class='text-left p-2'>Rule ID</th>
+                    <th class='text-left p-2'>Description</th>
+                    <th class='text-left p-2'>Severity</th>
+                    <th class='text-left p-2'>Count</th>
+                  </tr>
+                </thead>
+                <tbody id='top-vulnerabilities-body'>
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -2820,6 +2917,275 @@
       </form>
     </div>
   </div>
+
+  <!-- Security Testing Modal -->
+  <div id="security-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center aero-modal-backdrop">
+    <div class="aero-modal p-0 w-full max-w-6xl h-[90vh] flex flex-col">
+      <header class="p-4 border-b aero-divider flex justify-between items-center flex-shrink-0">
+        <div class="flex items-center gap-4">
+          <h2 class="text-2xl font-bold aero-text-primary">🔒 Security Testing Center</h2>
+          <div id="security-status-badge" class="text-sm px-3 py-1 rounded-full bg-green-500/20 text-green-400">
+            Ready
+          </div>
+        </div>
+        <div class="flex space-x-3">
+          <button onclick="runQuickSecurityScan()" class="aero-button-success py-2 px-4 rounded-lg">
+            ▶️ Quick Scan
+          </button>
+          <button onclick="closeSecurityModal()" class="aero-button-gray py-2 px-4 rounded-lg">Close</button>
+        </div>
+      </header>
+
+      <div class="flex-grow flex min-h-0">
+        <!-- Sidebar -->
+        <aside class="w-64 p-4 border-r aero-divider overflow-y-auto flex-shrink-0">
+          <!-- Tabs -->
+          <div class="space-y-2 mb-6">
+            <button onclick="switchSecurityTab('scan')"
+              class="security-tab-btn w-full text-left px-4 py-2 rounded-lg aero-button active" data-tab="scan">
+              🔍 Run Scan
+            </button>
+            <button onclick="switchSecurityTab('results')"
+              class="security-tab-btn w-full text-left px-4 py-2 rounded-lg aero-button" data-tab="results">
+              📋 Results
+            </button>
+            <button onclick="switchSecurityTab('history')"
+              class="security-tab-btn w-full text-left px-4 py-2 rounded-lg aero-button" data-tab="history">
+              📊 History
+            </button>
+            <button onclick="switchSecurityTab('policy')"
+              class="security-tab-btn w-full text-left px-4 py-2 rounded-lg aero-button" data-tab="policy">
+              ⚙️ Policy
+            </button>
+          </div>
+
+          <!-- Quick Stats -->
+          <div class="aero-glass-panel p-4 rounded-lg">
+            <h4 class="text-sm font-semibold aero-text-secondary mb-3">Quick Stats</h4>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between">
+                <span class="aero-text-muted">Total Scans</span>
+                <span id="sec-stat-total" class="font-semibold">0</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="aero-text-muted">Passed</span>
+                <span id="sec-stat-passed" class="font-semibold text-green-400">0</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="aero-text-muted">Failed</span>
+                <span id="sec-stat-failed" class="font-semibold text-red-400">0</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-grow p-6 overflow-y-auto">
+          <!-- Scan Tab -->
+          <div id="security-tab-scan" class="security-tab-content">
+            <h3 class="text-xl font-semibold aero-text-primary mb-4">Security Scan</h3>
+
+            <!-- Scan Type Selection -->
+            <div class="mb-6 aero-glass-panel p-4 rounded-lg">
+              <h4 class="text-sm font-semibold aero-text-secondary mb-3">Scan Types</h4>
+              <div class="flex flex-wrap gap-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="scan-type-sast" checked class="w-4 h-4">
+                  <span class="text-sm">SAST (Code Analysis)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="scan-type-secrets" checked class="w-4 h-4">
+                  <span class="text-sm">Secrets Detection</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="scan-type-xss" class="w-4 h-4">
+                  <span class="text-sm">XSS Patterns</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Language Selection -->
+            <div class="mb-6">
+              <label class="block text-sm font-medium aero-text-secondary mb-2">Language</label>
+              <select id="security-scan-language" class="w-full aero-input p-3 rounded-lg">
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="robot">Robot Framework</option>
+              </select>
+            </div>
+
+            <!-- Code Input -->
+            <div class="mb-6">
+              <label class="block text-sm font-medium aero-text-secondary mb-2">Code to Scan</label>
+              <textarea id="security-code-input" rows="15" class="w-full code-area p-4 rounded-lg font-mono text-sm"
+                placeholder="Paste code here to scan for security vulnerabilities...
+
+Example vulnerable code:
+const password = 'secret123';
+eval(userInput);
+document.innerHTML = data;
+"></textarea>
+            </div>
+
+            <!-- Scan Button -->
+            <div class="flex gap-3">
+              <button onclick="runSecurityCodeScan()" class="aero-button-success py-3 px-6 rounded-lg font-semibold">
+                🔍 Run Security Scan
+              </button>
+              <button onclick="scanCurrentSuite()" class="aero-button-info py-3 px-6 rounded-lg">
+                📄 Scan Selected Suite
+              </button>
+              <button onclick="clearSecurityInput()" class="aero-button-gray py-3 px-6 rounded-lg">
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <!-- Results Tab -->
+          <div id="security-tab-results" class="security-tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="text-xl font-semibold aero-text-primary">Scan Results</h3>
+              <div class="flex gap-2">
+                <button onclick="saveSecurityScanAsSuite()" class="aero-button-success text-sm py-2 px-4 rounded-lg">
+                  💾 Save as Suite
+                </button>
+                <button onclick="exportSecurityResults()" class="aero-button-info text-sm py-2 px-4 rounded-lg">
+                  📥 Export
+                </button>
+              </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div id="security-results-summary" class="grid grid-cols-4 gap-4 mb-6">
+              <div class="aero-glass-panel p-4 rounded-lg text-center border-l-4 border-red-500">
+                <div id="result-critical" class="text-3xl font-bold text-red-400">0</div>
+                <div class="text-sm aero-text-muted">Critical</div>
+              </div>
+              <div class="aero-glass-panel p-4 rounded-lg text-center border-l-4 border-orange-500">
+                <div id="result-high" class="text-3xl font-bold text-orange-400">0</div>
+                <div class="text-sm aero-text-muted">High</div>
+              </div>
+              <div class="aero-glass-panel p-4 rounded-lg text-center border-l-4 border-yellow-500">
+                <div id="result-medium" class="text-3xl font-bold text-yellow-400">0</div>
+                <div class="text-sm aero-text-muted">Medium</div>
+              </div>
+              <div class="aero-glass-panel p-4 rounded-lg text-center border-l-4 border-green-500">
+                <div id="result-low" class="text-3xl font-bold text-green-400">0</div>
+                <div class="text-sm aero-text-muted">Low</div>
+              </div>
+            </div>
+
+            <!-- Policy Status -->
+            <div id="security-policy-status" class="mb-6 p-4 aero-glass-panel rounded-lg border-l-4 border-green-500">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">✅</span>
+                <div>
+                  <div class="font-semibold">Policy Check: Passed</div>
+                  <div class="text-sm aero-text-muted">No policy violations detected</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Vulnerabilities List -->
+            <div id="security-vulnerabilities-list" class="space-y-3">
+              <div class="aero-glass-panel p-6 rounded-lg text-center aero-text-muted">
+                No scan results yet. Run a security scan to see vulnerabilities.
+              </div>
+            </div>
+          </div>
+
+          <!-- History Tab -->
+          <div id="security-tab-history" class="security-tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="text-xl font-semibold aero-text-primary">Scan History</h3>
+              <button onclick="clearSecurityHistory()" class="aero-button-danger text-sm py-2 px-4 rounded-lg">
+                🗑️ Clear History
+              </button>
+            </div>
+
+            <div id="security-history-list" class="space-y-3">
+              <div class="aero-glass-panel p-6 rounded-lg text-center aero-text-muted">
+                No scan history yet.
+              </div>
+            </div>
+          </div>
+
+          <!-- Policy Tab -->
+          <div id="security-tab-policy" class="security-tab-content hidden">
+            <h3 class="text-xl font-semibold aero-text-primary mb-4">Security Policy Configuration</h3>
+
+            <div class="aero-glass-panel p-6 rounded-lg mb-6">
+              <h4 class="font-semibold mb-4">Failure Threshold</h4>
+              <div class="space-y-3">
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input type="radio" name="policy-fail-on" value="critical" checked class="w-4 h-4">
+                  <span>Fail on Critical only</span>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input type="radio" name="policy-fail-on" value="high" class="w-4 h-4">
+                  <span>Fail on Critical or High</span>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input type="radio" name="policy-fail-on" value="medium" class="w-4 h-4">
+                  <span>Fail on Critical, High, or Medium</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="aero-glass-panel p-6 rounded-lg mb-6">
+              <h4 class="font-semibold mb-4">Maximum Allowed Vulnerabilities</h4>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm aero-text-muted mb-1">Max Critical</label>
+                  <input type="number" id="policy-max-critical" value="0" min="0"
+                    class="w-full aero-input p-2 rounded-lg">
+                </div>
+                <div>
+                  <label class="block text-sm aero-text-muted mb-1">Max High</label>
+                  <input type="number" id="policy-max-high" value="5" min="0" class="w-full aero-input p-2 rounded-lg">
+                </div>
+                <div>
+                  <label class="block text-sm aero-text-muted mb-1">Max Medium</label>
+                  <input type="number" id="policy-max-medium" value="20" min="0"
+                    class="w-full aero-input p-2 rounded-lg">
+                </div>
+                <div>
+                  <label class="block text-sm aero-text-muted mb-1">Max Low</label>
+                  <input type="number" id="policy-max-low" value="50" min="0" class="w-full aero-input p-2 rounded-lg">
+                </div>
+              </div>
+            </div>
+
+            <div class="aero-glass-panel p-6 rounded-lg mb-6">
+              <h4 class="font-semibold mb-4">Pipeline Integration</h4>
+              <label class="flex items-center gap-3 cursor-pointer mb-3">
+                <input type="checkbox" id="policy-block-pipeline" checked class="w-4 h-4">
+                <span>Block pipeline on policy failure</span>
+              </label>
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" id="policy-notify-failure" checked class="w-4 h-4">
+                <span>Send notification on policy failure</span>
+              </label>
+            </div>
+
+            <button onclick="saveSecurityPolicy()" class="aero-button-success py-3 px-6 rounded-lg font-semibold">
+              💾 Save Policy
+            </button>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- Visual Pipeline Scripts -->
+  <script src="graph-engine.js"></script>
+  <script src="pipeline-manager.js"></script>
+  <script src="visual-editor.js"></script>
+  <script src="script.js"></script>
+
+  <!-- Security Testing Scripts -->
+  <script src="security-testing.js"></script>
+  <script src="security-ui.js"></script>
 </body>
 
 </html>
