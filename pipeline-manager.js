@@ -862,6 +862,70 @@ async function runGraphPipeline(pipeline) {
                 }
             }
 
+            // AI Unit Test node
+            if (nodeType === 'ai-unit-test') {
+                consoleOutput.innerHTML += `<span class="text-cyan-400">  🤖 Running AI-Generated Tests...</span><br>`;
+                window.currentPipelineExecutionLog += `  🤖 Running AI-Generated Tests...\n`;
+
+                const config = node.data;
+
+                // Validate: must have generated code
+                if (!config.generatedCode || config.generatedCode.trim() === '') {
+                    const msg = 'No test code generated yet. Open config and generate tests first.';
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ✗ ${msg}</span><br>`;
+                    return { status: 'FAILURE', message: msg };
+                }
+
+                // Determine working directory from upstream repo or artifacts
+                const repoPath = inputs?.repoPath || inputs?.artifacts?.repoPath;
+                const cwd = repoPath || config.cwd;
+
+                if (!cwd) {
+                    const msg = 'No working directory. Connect a Git Repo node upstream or set CWD in config.';
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ✗ ${msg}</span><br>`;
+                    return { status: 'FAILURE', message: msg };
+                }
+
+                // Inject test file
+                const testFilename = config.testFilename || 'ai-generated-test.js';
+                consoleOutput.innerHTML += `<span class="text-blue-300">  💾 Injecting test file: ${testFilename}...</span><br>`;
+                window.currentPipelineExecutionLog += `  💾 Injecting test file: ${testFilename}...\n`;
+
+                try {
+                    const fullPath = cwd.replace(/\\/g, '/') + '/' + testFilename;
+                    await window.electronAPI.fileOps.writeFile(fullPath, config.generatedCode);
+                } catch (injectErr) {
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ❌ Injection Failed: ${injectErr.message}</span><br>`;
+                    return { status: 'FAILURE', message: `Injection Failed: ${injectErr.message}` };
+                }
+
+                // Execute test command
+                const cmd = config.command || `node ${testFilename}`;
+                consoleOutput.innerHTML += `<span class="text-gray-300">  > ${cmd}</span><br>`;
+                window.currentPipelineExecutionLog += `  > ${cmd}\n`;
+
+                try {
+                    const result = await window.electronAPI.sysOps.runCommand(cwd, cmd);
+
+                    // Display output
+                    const outputLog = (result.stdout + "\n" + result.stderr).trim();
+                    const outputHtml = outputLog.replace(/\n/g, '<br>').replace(/\s/g, '&nbsp;');
+                    consoleOutput.innerHTML += `<div class="text-xs text-gray-400 font-mono p-2 bg-gray-900 rounded my-2 max-h-60 overflow-auto whitespace-nowrap">${outputHtml}</div>`;
+                    window.currentPipelineExecutionLog += outputLog + "\n";
+
+                    if (result.exitCode === 0) {
+                        consoleOutput.innerHTML += `<span class="text-green-400">  ✅ AI Tests Passed</span><br>`;
+                        return { status: 'SUCCESS', message: 'AI Tests Passed', output: result.stdout };
+                    } else {
+                        consoleOutput.innerHTML += `<span class="text-red-400">  ❌ AI Tests Failed (Exit Code: ${result.exitCode})</span><br>`;
+                        return { status: 'FAILURE', message: `AI Tests Failed (exit ${result.exitCode})`, output: result.stderr || result.stdout };
+                    }
+                } catch (err) {
+                    consoleOutput.innerHTML += `<span class="text-red-400">  ❌ Execution Error: ${err.message}</span><br>`;
+                    return { status: 'FAILURE', message: err.message };
+                }
+            }
+
             // Security Scan node
             if (nodeType === 'security_scan') {
                 consoleOutput.innerHTML += `<span class="text-purple-400">  🔒 Running Security Scan...</span><br>`;

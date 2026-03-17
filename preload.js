@@ -20,5 +20,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // System Operations
     sysOps: {
         runCommand: (cwd, cmd) => ipcRenderer.invoke('sys-ops', 'runCommand', { cwd, cmd })
+    },
+
+    // AI Operations
+    aiOps: {
+        generate: (provider, model, apiKey, prompt, systemPrompt, customEndpoint, maxTokens) =>
+            ipcRenderer.invoke('ai-ops', 'generate', { provider, model, apiKey, prompt, systemPrompt, customEndpoint, maxTokens })
     }
 });

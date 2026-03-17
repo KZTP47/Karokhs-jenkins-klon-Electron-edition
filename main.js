@@ -166,7 +166,119 @@ ipcMain.handle('sys-ops', async (event, command, args) => {
     }
 });
 
-app.whenReady().then(() => {
+// ==========================================
+// AI API HANDLER
+// ==========================================
+ipcMain.handle('ai-ops', async (event, command, args) => {
+    if (command === 'generate') {
+        const { provider, model, apiKey, prompt, systemPrompt, maxTokens: userMaxTokens } = args;
+        const tokenLimit = userMaxTokens || 16384;
+
+        // Determine the API endpoint and request format based on provider
+        let url, headers, body;
+
+        if (provider === 'openai') {
+            url = 'https://api.openai.com/v1/chat/completions';
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            };
+            body = JSON.stringify({
+                model: model || 'gpt-4o',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.3,
+                max_tokens: tokenLimit
+            });
+        } else if (provider === 'anthropic') {
+            url = 'https://api.anthropic.com/v1/messages';
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+            };
+            body = JSON.stringify({
+                model: model || 'claude-sonnet-4-20250514',
+                max_tokens: tokenLimit,
+                system: systemPrompt,
+                messages: [
+                    { role: 'user', content: prompt }
+                ]
+            });
+        } else if (provider === 'google') {
+            url = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`;
+            headers = { 'Content-Type': 'application/json' };
+            body = JSON.stringify({
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.3, maxOutputTokens: tokenLimit }
+            });
+        } else if (provider === 'custom') {
+            // Custom OpenAI-compatible endpoint
+            url = args.customEndpoint;
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            };
+            body = JSON.stringify({
+                model: model || 'default',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.3,
+                max_tokens: tokenLimit
+            });
+        } else {
+            throw new Error(`Unknown AI provider: ${provider}`);
+        }
+
+        console.log(`[Main] AI API Request to ${provider} (${model})`);
+
+        // Use Node.js built-in fetch (available in Electron's Node.js >= 18)
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: body
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`AI API Error (${response.status}): ${errorText}`);
+        }
+
+        const data = await response.json();
+
+        // Extract the generated text based on provider response format
+        let generatedText = '';
+        if (provider === 'openai' || provider === 'custom') {
+            generatedText = data.choices?.[0]?.message?.content || '';
+        } else if (provider === 'anthropic') {
+            generatedText = data.content?.[0]?.text || '';
+        } else if (provider === 'google') {
+            generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        }
+
+        return { success: true, generatedText: generatedText };
+    }
+});
+
+// Clear corrupted GPU/disk cache on startup to prevent IndexedDB failures
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
+app.whenReady().then(async () => {
+    // Clear stale cache that causes "Access is denied" and IndexedDB errors
+    try {
+        const session = require('electron').session;
+        await session.defaultSession.clearCache();
+        await session.defaultSession.clearStorageData({ storages: ['cachestorage'] });
+        console.log('[Main] Cache cleared successfully');
+    } catch (e) {
+        console.warn('[Main] Cache clear warning (non-fatal):', e.message);
+    }
+
     createWindow();
 
     app.on('activate', () => {

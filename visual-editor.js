@@ -219,7 +219,7 @@ class VisualEditor {
             </div>
             <div class="ve-toolbar-section" style="margin-top:15px;">
                 <div class="ve-toolbar-header" style="font-size:0.9rem;">🔌 Integrations</div>
-                <div id="ve-integration-nodes" class="ve-suite-list" style="max-height:90px; min-height:auto;">
+                <div id="ve-integration-nodes" class="ve-suite-list" style="max-height:140px; min-height:auto;">
                     <div class="ve-palette-item aero-card" draggable="true" data-type="git-repo" 
                          style="background: linear-gradient(180deg, #fdba74 0%, #fb923c 100%); cursor:grab;">
                         📦 Git Repo
@@ -227,6 +227,10 @@ class VisualEditor {
                      <div class="ve-palette-item aero-card" draggable="true" data-type="unit-test-runner" 
                          style="background: linear-gradient(180deg, #ddd6fe 0%, #c4b5fd 100%); cursor:grab;">
                         🧪 Unit Test
+                    </div>
+                    <div class="ve-palette-item aero-card" draggable="true" data-type="ai-unit-test"
+                         style="background: linear-gradient(180deg, #a5f3fc 0%, #06b6d4 100%); cursor:grab;">
+                        🤖 AI Unit Test
                     </div>
                 </div>
             </div>
@@ -397,6 +401,25 @@ class VisualEditor {
                 },
                 position: { x, y }
             });
+        } else if (data.type === 'ai-unit-test') {
+            this.addNode({
+                id: 'node_' + Date.now(),
+                type: 'ai-unit-test',
+                data: {
+                    name: '🤖 AI Unit Test',
+                    provider: 'openai',
+                    model: '',
+                    apiKey: '',
+                    customEndpoint: '',
+                    instructions: '',
+                    testFilename: 'ai-generated-test.js',
+                    generatedCode: '',
+                    command: 'node ai-generated-test.js',
+                    cwd: '',
+                    lastGeneratedAt: null
+                },
+                position: { x, y }
+            });
         }
     }
 
@@ -436,13 +459,16 @@ class VisualEditor {
             } else if (node.type === 'unit-test-runner') {
                 headerStyle = 'background: linear-gradient(180deg, #ddd6fe 0%, #8b5cf6 100%); color: #4c1d95;';
                 showConfigBtn = true;
+            } else if (node.type === 'ai-unit-test') {
+                headerStyle = 'background: linear-gradient(180deg, #a5f3fc 0%, #06b6d4 100%); color: #164e63;';
+                showConfigBtn = true;
             }
 
             el.innerHTML = `
                 <div class="ve-node-header" style="${headerStyle}">
                     <span style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${node.data.name}</span>
                     <div style="display: flex; gap: 4px;">
-                        ${showConfigBtn ? `<button class="ve-node-config-btn" title="Configure" onclick="${node.type === 'git-repo' ? 'visualEditor.showGitNodeConfig' : (node.type === 'unit-test-runner' ? 'visualEditor.showUnitTestConfig' : 'visualEditor.showSecurityNodeConfig')}('${node.id}')" style="padding: 2px 6px; font-size: 12px; background: rgba(255,255,255,0.3); border: none; border-radius: 3px; cursor: pointer;">⚙️</button>` : ''}
+                        ${showConfigBtn ? `<button class="ve-node-config-btn" title="Configure" onclick="${node.type === 'git-repo' ? 'visualEditor.showGitNodeConfig' : (node.type === 'unit-test-runner' ? 'visualEditor.showUnitTestConfig' : (node.type === 'ai-unit-test' ? 'visualEditor.showAIUnitTestConfig' : 'visualEditor.showSecurityNodeConfig'))}('${node.id}')" style="padding: 2px 6px; font-size: 12px; background: rgba(255,255,255,0.3); border: none; border-radius: 3px; cursor: pointer;">⚙️</button>` : ''}
                         ${showRunBtn ? `<button class="ve-node-run-btn" title="Run this job" onclick="visualEditor.runNode('${node.id}')">▶</button>` : ''}
                     </div>
                 </div>
@@ -685,6 +711,12 @@ class VisualEditor {
         // Handle git nodes
         if (node.type === 'git-repo') {
             this._runGitNode(node);
+            return;
+        }
+
+        // Handle AI unit test nodes
+        if (node.type === 'ai-unit-test') {
+            this._runAIUnitTestNode(node);
             return;
         }
 
@@ -1088,6 +1120,7 @@ class VisualEditor {
         try {
             const result = await window.electronAPI.gitOps.clone(node.data.repoUrl, node.data.branch, node.data.auth);
             console.log('Clone Result:', result);
+            node.data.clonedPath = result.path;
             if (window.showToast) window.showToast(`✅ Cloned to ${result.path}`, 'success');
         } catch (err) {
             console.error(err);
@@ -1163,6 +1196,483 @@ class VisualEditor {
             modal.remove();
             if (window.showToast) window.showToast('Test injection config saved', 'success');
         };
+    }
+
+    showAIUnitTestConfig(nodeId) {
+        const node = this.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000]';
+
+        const config = node.data;
+
+        // Determine which provider options to show as selected
+        const providerOptions = ['openai', 'anthropic', 'google', 'custom'].map(p => {
+            const labels = { openai: 'OpenAI', anthropic: 'Anthropic (Claude)', google: 'Google (Gemini)', custom: 'Custom (OpenAI-compatible)' };
+            return `<option value="${p}" ${config.provider === p ? 'selected' : ''} style="color: black; background: white;">${labels[p]}</option>`;
+        }).join('');
+
+        modal.innerHTML = `
+            <div class="aero-modal p-6 rounded-xl max-w-2xl w-full flex flex-col max-h-[90vh]" style="background: linear-gradient(180deg, #083344 0%, #042f2e 100%); border: 1px solid rgba(6, 182, 212, 0.5);">
+                <h3 class="text-xl font-bold text-white mb-4">🤖 AI powered unit tester</h3>
+
+                <div class="space-y-4 mb-6 flex-1 overflow-y-auto" style="padding-right: 8px;">
+                    <!-- Test Filename -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">Test file name (to inject)</label>
+                        <input type="text" id="cfg-ai-filename" value="${config.testFilename || 'ai-generated-test.js'}"
+                            placeholder="e.g. ai-generated-test.js"
+                            class="w-full aero-input p-2 rounded-lg font-mono text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+
+                    <!-- AI Provider -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">AI model</label>
+                        <select id="cfg-ai-provider" class="w-full aero-input p-2 rounded-lg text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                            ${providerOptions}
+                        </select>
+                    </div>
+
+                    <!-- Model Name -->
+                    <div id="cfg-ai-model-group">
+                        <label class="block text-sm text-gray-200 mb-1">Model name <span class="text-gray-400">(optional -- defaults will be used if empty)</span></label>
+                        <input type="text" id="cfg-ai-model" value="${config.model || ''}"
+                            placeholder="e.g. gpt-4o, claude-sonnet-4-20250514, gemini-2.5-flash"
+                            class="w-full aero-input p-2 rounded-lg font-mono text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+
+                    <!-- Custom Endpoint (only visible when provider=custom) -->
+                    <div id="cfg-ai-endpoint-group" style="display: ${config.provider === 'custom' ? 'block' : 'none'};">
+                        <label class="block text-sm text-gray-200 mb-1">Custom API endpoint</label>
+                        <input type="text" id="cfg-ai-endpoint" value="${config.customEndpoint || ''}"
+                            placeholder="https://your-api.example.com/v1/chat/completions"
+                            class="w-full aero-input p-2 rounded-lg font-mono text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+
+                    <!-- Max Tokens -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">Max tokens (output limit)</label>
+                        <input type="number" id="cfg-ai-max-tokens" value="${config.maxTokens || 16384}"
+                            min="1024" max="65536" step="1024"
+                            placeholder="16384"
+                            class="w-full aero-input p-2 rounded-lg font-mono text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                        <p class="text-xs text-gray-400 mt-1">Higher values = longer tests but more API cost. If tests get cut off mid-code, increase this.</p>
+                    </div>
+
+                    <!-- API Key -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">API Key</label>
+                        <input type="password" id="cfg-ai-apikey" value="${config.apiKey || ''}"
+                            placeholder="sk-..."
+                            class="w-full aero-input p-2 rounded-lg font-mono text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                    </div>
+
+                    <!-- Source Code from Git Repo -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">Source code from connected Git Repo</label>
+                        <div id="cfg-ai-source-area" class="rounded-lg p-3" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); min-height: 60px;">
+                            <div id="cfg-ai-source-status" class="text-xs text-gray-400 mb-2">
+                                Click "Load files from repo" to scan the connected Git Repo node for source files.
+                            </div>
+                            <button id="cfg-ai-load-files" class="py-1 px-3 rounded text-xs font-semibold"
+                                style="background: rgba(6, 182, 212, 0.3); color: #a5f3fc; border: 1px solid rgba(6, 182, 212, 0.4); cursor: pointer;">
+                                Load files from repo
+                            </button>
+                            <div id="cfg-ai-file-list" class="mt-2" style="max-height: 150px; overflow-y: auto;"></div>
+                            <p class="text-xs text-gray-500 mt-1">Selected files will be included in the AI prompt so it can generate tests based on your actual source code.</p>
+                        </div>
+                    </div>
+
+                    <!-- Instructions -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">Instructions given to AI</label>
+                        <textarea id="cfg-ai-instructions" class="w-full h-32 aero-input p-3 rounded-lg text-sm"
+                            style="background: rgba(255,255,255,0.08); color: #a5f3fc; border-color: rgba(6, 182, 212, 0.3);"
+                            placeholder="Describe what you want to test. For example:\n\n- Test the login function in auth.js\n- Cover edge cases like empty passwords, SQL injection attempts\n- Use Jest as the testing framework\n- Mock the database connection">${config.instructions || ''}</textarea>
+                    </div>
+
+                    <!-- Generate Button -->
+                    <div class="flex items-center gap-3">
+                        <button id="cfg-ai-generate" class="py-2 px-4 rounded-lg font-semibold text-sm"
+                            style="background: linear-gradient(180deg, #06b6d4, #0891b2); color: white; border: none; cursor: pointer;">
+                            Generate Tests with AI
+                        </button>
+                        <span id="cfg-ai-status" class="text-xs text-gray-400"></span>
+                    </div>
+
+                    <!-- Generated Code Display -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">Unit-Test Code generated</label>
+                        <textarea id="cfg-ai-code" class="w-full h-64 aero-input p-3 rounded-lg font-mono text-sm"
+                            style="background: #0f172a; color: #67e8f9; border-color: rgba(6, 182, 212, 0.3);"
+                            placeholder="AI-generated test code will appear here after clicking 'Generate Tests with AI'.\nYou can also manually edit the code.">${config.generatedCode || ''}</textarea>
+                    </div>
+
+                    <!-- Execution Command -->
+                    <div>
+                        <label class="block text-sm text-gray-200 mb-1">Execution command</label>
+                        <input type="text" id="cfg-ai-command" value="${config.command || 'node ai-generated-test.js'}"
+                            placeholder="e.g. node ai-generated-test.js, npx jest ai-generated-test.js"
+                            class="w-full aero-input p-2 rounded-lg font-mono text-sm" style="background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.2);">
+                        <p class="text-xs text-gray-400 mt-1">This command runs in the repo root after injecting the test file.</p>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 justify-end mt-auto pt-4 border-t border-gray-700">
+                    <button id="cfg-ai-cancel" class="aero-button-gray py-2 px-4 rounded-lg">Cancel</button>
+                    <button id="cfg-ai-save" class="py-2 px-4 rounded-lg font-semibold" style="background: linear-gradient(180deg, #06b6d4, #0891b2); color: white; border: none; cursor: pointer;">save</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Show/hide custom endpoint field based on provider selection
+        const providerSelect = modal.querySelector('#cfg-ai-provider');
+        const endpointGroup = modal.querySelector('#cfg-ai-endpoint-group');
+        providerSelect.addEventListener('change', () => {
+            endpointGroup.style.display = providerSelect.value === 'custom' ? 'block' : 'none';
+        });
+
+        // -- Source file loading logic --
+        // This tracks which files the user has loaded/selected from the connected Git Repo
+        let loadedSourceFiles = []; // Array of { path: string, content: string, selected: boolean }
+
+        // Helper: find connected Git Repo node
+        const findConnectedGitRepo = () => {
+            const incomingEdges = this.edges.filter(e => e.target === nodeId);
+            for (const edge of incomingEdges) {
+                const sourceNode = this.nodes.find(n => n.id === edge.source);
+                if (sourceNode && sourceNode.type === 'git-repo' && sourceNode.data.clonedPath) {
+                    return sourceNode;
+                }
+            }
+            return null;
+        };
+
+        // Load files button handler
+        modal.querySelector('#cfg-ai-load-files').onclick = async () => {
+            const statusEl = modal.querySelector('#cfg-ai-source-status');
+            const fileListEl = modal.querySelector('#cfg-ai-file-list');
+            const loadBtn = modal.querySelector('#cfg-ai-load-files');
+
+            const gitRepoNode = findConnectedGitRepo();
+            if (!gitRepoNode) {
+                statusEl.textContent = 'ERROR: No connected Git Repo node found. Connect a Git Repo node to this AI Unit Test node first, then clone the repo.';
+                statusEl.style.color = '#f87171';
+                return;
+            }
+
+            const repoPath = gitRepoNode.data.clonedPath;
+            loadBtn.disabled = true;
+            loadBtn.textContent = 'Scanning...';
+            statusEl.textContent = `Scanning ${repoPath}...`;
+            statusEl.style.color = '#a5f3fc';
+
+            try {
+                // Use electronAPI to list all source files in the cloned repo
+                // List common source file extensions
+                const allFiles = await window.electronAPI.fileOps.listFiles(repoPath);
+
+                // Filter to likely source code files (not binaries, not node_modules, not .git)
+                const sourceExtensions = ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'cs', 'go', 'rb', 'php', 'c', 'cpp', 'h', 'rs', 'swift', 'kt', 'scala', 'vue', 'svelte', 'mjs', 'cjs'];
+                const sourceFiles = allFiles.filter(f => {
+                    const ext = f.split('.').pop().toLowerCase();
+                    return sourceExtensions.includes(ext);
+                });
+
+                if (sourceFiles.length === 0) {
+                    statusEl.textContent = 'WARNING: No source code files found in the repo.';
+                    statusEl.style.color = '#fbbf24';
+                    loadBtn.disabled = false;
+                    loadBtn.textContent = 'Load files from repo';
+                    return;
+                }
+
+                statusEl.textContent = `Found ${sourceFiles.length} source file(s). Select the ones you want the AI to analyze:`;
+                statusEl.style.color = '#4ade80';
+
+                // Render checkbox list of files
+                // Show paths relative to repo root for readability
+                fileListEl.innerHTML = sourceFiles.map((filePath, index) => {
+                    const relativePath = filePath.replace(repoPath, '').replace(/^[\\/]/, '');
+                    return `
+                        <label class="flex items-center gap-2 py-1 px-2 rounded hover:bg-white/5 cursor-pointer text-xs text-gray-200" style="display:flex;">
+                            <input type="checkbox" class="cfg-ai-file-cb" data-index="${index}" data-path="${filePath}" checked>
+                            <span class="font-mono">${relativePath}</span>
+                        </label>
+                    `;
+                }).join('');
+
+                // Store file paths for later reading
+                loadedSourceFiles = sourceFiles.map(f => ({ path: f, selected: true, content: null }));
+
+            } catch (err) {
+                console.error('File scanning error:', err);
+                statusEl.textContent = `ERROR: Error scanning repo: ${err.message}`;
+                statusEl.style.color = '#f87171';
+            } finally {
+                loadBtn.disabled = false;
+                loadBtn.textContent = 'Reload files from repo';
+            }
+        };
+
+        // Generate button handler
+        modal.querySelector('#cfg-ai-generate').onclick = async () => {
+            const provider = modal.querySelector('#cfg-ai-provider').value;
+            const model = modal.querySelector('#cfg-ai-model').value.trim();
+            const apiKey = modal.querySelector('#cfg-ai-apikey').value.trim();
+            const instructions = modal.querySelector('#cfg-ai-instructions').value.trim();
+            const filename = modal.querySelector('#cfg-ai-filename').value.trim();
+            const customEndpoint = modal.querySelector('#cfg-ai-endpoint').value.trim();
+            const statusEl = modal.querySelector('#cfg-ai-status');
+            const codeEl = modal.querySelector('#cfg-ai-code');
+            const generateBtn = modal.querySelector('#cfg-ai-generate');
+
+            if (!apiKey) {
+                statusEl.textContent = 'ERROR: API Key is required';
+                statusEl.style.color = '#f87171';
+                return;
+            }
+            if (!instructions) {
+                statusEl.textContent = 'ERROR: Instructions are required';
+                statusEl.style.color = '#f87171';
+                return;
+            }
+
+            // -- Read selected source files from the repo --
+            // Update selection state from checkboxes
+            const checkboxes = modal.querySelectorAll('.cfg-ai-file-cb');
+            checkboxes.forEach(cb => {
+                const idx = parseInt(cb.dataset.index);
+                if (loadedSourceFiles[idx]) {
+                    loadedSourceFiles[idx].selected = cb.checked;
+                }
+            });
+
+            const selectedFiles = loadedSourceFiles.filter(f => f.selected);
+            let sourceCodeContext = '';
+
+            // Warn user if no source files are loaded — AI will hallucinate
+            if (selectedFiles.length === 0) {
+                const proceed = confirm(
+                    'WARNING: No source files loaded!\n\n' +
+                    'Without source code, the AI will generate generic/hypothetical tests that probably won\'t work.\n\n' +
+                    'Click "Cancel" to go back and click "Load files from repo" first.\n' +
+                    'Click "OK" to generate anyway (not recommended).'
+                );
+                if (!proceed) {
+                    return;
+                }
+            }
+
+            if (selectedFiles.length > 0) {
+                statusEl.textContent = `Reading ${selectedFiles.length} source file(s)...`;
+                statusEl.style.color = '#a5f3fc';
+
+                try {
+                    // Read each selected file's content via Electron API
+                    for (const file of selectedFiles) {
+                        if (!file.content) {
+                            file.content = await window.electronAPI.fileOps.readFile(file.path);
+                        }
+                    }
+
+                    // Build the source code context block for the AI prompt
+                    const gitRepoNode = findConnectedGitRepo();
+                    const repoPath = gitRepoNode ? gitRepoNode.data.clonedPath : '';
+
+                    sourceCodeContext = '\n\n--- SOURCE CODE FROM REPOSITORY ---\n' +
+                        selectedFiles.map(f => {
+                            const relativePath = f.path.replace(repoPath, '').replace(/^[\\/]/, '');
+                            return `\n=== FILE: ${relativePath} ===\n${f.content}\n`;
+                        }).join('') +
+                        '\n--- END OF SOURCE CODE ---\n';
+                } catch (err) {
+                    console.error('Error reading source files:', err);
+                    statusEl.textContent = `WARNING: Could not read some source files: ${err.message}. Generating without source context.`;
+                    statusEl.style.color = '#fbbf24';
+                    sourceCodeContext = '';
+                }
+            }
+
+            // Build the system prompt for test generation
+            const systemPrompt = `You are an expert test engineer. Generate comprehensive unit test code based on the user's instructions and the provided source code.
+
+CRITICAL RULES:
+1. Generate STANDALONE Node.js tests using ONLY the built-in "assert" module (require('assert') or require('node:assert')).
+   DO NOT use Jest, Mocha, Vitest, or any external testing framework. The test file must be runnable with "node ${filename}" directly.
+2. Structure your test file like this:
+   - require('assert') at the top
+   - require/import the source module(s) using CORRECT RELATIVE PATHS (the test file will be in the repo root)
+   - Define test functions, each wrapped in try/catch that prints PASS or FAIL
+   - At the bottom, run all tests and print a summary (X passed, Y failed)
+3. Generate tests covering ALL of the following categories:
+   - HAPPY PATH: Standard expected usage with valid inputs that should succeed
+   - GOLDEN PATH: The ideal/optimal usage path through the system
+   - EDGE CASES: Boundary values, empty inputs, maximum values, type coercion, Unicode, special characters
+   - NEGATIVE PATH: Invalid inputs, error conditions, unauthorized access, malformed data, expected failures
+4. Each test must have a clear, descriptive name indicating what it tests and which category it belongs to.
+5. The code must be a COMPLETE, RUNNABLE file. Do not use markdown fences. Output ONLY valid code.
+6. The test file name will be: ${filename}
+7. Add a comment header summarizing the test coverage.
+8. If source code files are provided below, analyze them CAREFULLY and generate tests that SPECIFICALLY target the actual functions, classes, exports, and logic found in those files. DO NOT invent hypothetical modules. Use the real function names, real parameter signatures, and real module paths from the provided source code.
+9. If NO source code is provided, generate tests based solely on the user's instructions. Clearly state in a comment that no source was provided.
+10. NEVER generate tests for imaginary or hypothetical code. Only test what actually exists in the provided source files.
+
+Example test structure:
+const assert = require('assert');
+const myModule = require('./src/myModule'); // real path from source
+
+let passed = 0, failed = 0;
+function test(name, fn) {
+  try { fn(); passed++; console.log('  PASS: ' + name); }
+  catch(e) { failed++; console.log('  FAIL: ' + name + ' - ' + e.message); }
+}
+
+test('should add two numbers [HAPPY PATH]', () => { assert.strictEqual(myModule.add(1,2), 3); });
+// ... more tests ...
+
+console.log('\\nResults: ' + passed + ' passed, ' + failed + ' failed');
+process.exit(failed > 0 ? 1 : 0);
+
+Output ONLY the test code. No explanations, no markdown, no fences. Just valid, runnable code.`;
+
+            // Build the user prompt -- include source code context if available
+            const userPrompt = instructions + sourceCodeContext;
+
+            // Disable button, show loading
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating...';
+            statusEl.textContent = 'Calling AI API...';
+            statusEl.style.color = '#a5f3fc';
+
+            try {
+                // Check if electronAPI is available (running in Electron)
+                if (window.electronAPI && window.electronAPI.aiOps) {
+                    const maxTokens = parseInt(modal.querySelector('#cfg-ai-max-tokens').value) || 16384;
+                    const result = await window.electronAPI.aiOps.generate(
+                        provider, model, apiKey, userPrompt, systemPrompt, customEndpoint, maxTokens
+                    );
+                    if (result.success && result.generatedText) {
+                        // Strip markdown code fences if the AI included them despite instructions
+                        let code = result.generatedText;
+                        code = code.replace(/^```[\w]*\n?/gm, '').replace(/\n?```$/gm, '').trim();
+                        codeEl.value = code;
+                        statusEl.textContent = `Generated successfully at ${new Date().toLocaleTimeString()}`;
+                        statusEl.style.color = '#4ade80';
+                    } else {
+                        statusEl.textContent = 'ERROR: No code was generated';
+                        statusEl.style.color = '#f87171';
+                    }
+                } else {
+                    // Fallback for browser-only testing (non-Electron)
+                    // Use fetch directly (will hit CORS issues but useful for development)
+                    statusEl.textContent = 'ERROR: AI operations require the Electron desktop app';
+                    statusEl.style.color = '#f87171';
+                }
+            } catch (err) {
+                console.error('AI Generation Error:', err);
+                statusEl.textContent = `ERROR: ${err.message || err}`;
+                statusEl.style.color = '#f87171';
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Generate Tests with AI';
+            }
+        };
+
+        // Close modal on backdrop click
+        modal.onclick = (e) => {
+            if (e.target === modal) modal.remove();
+        };
+
+        // Cancel button
+        modal.querySelector('#cfg-ai-cancel').onclick = () => modal.remove();
+
+        // Save button
+        modal.querySelector('#cfg-ai-save').onclick = () => {
+            const filename = modal.querySelector('#cfg-ai-filename').value.trim();
+
+            node.data.testFilename = filename;
+            node.data.provider = modal.querySelector('#cfg-ai-provider').value;
+            node.data.model = modal.querySelector('#cfg-ai-model').value.trim();
+            node.data.apiKey = modal.querySelector('#cfg-ai-apikey').value.trim();
+            node.data.customEndpoint = modal.querySelector('#cfg-ai-endpoint').value.trim();
+            node.data.instructions = modal.querySelector('#cfg-ai-instructions').value;
+            node.data.generatedCode = modal.querySelector('#cfg-ai-code').value;
+            node.data.command = modal.querySelector('#cfg-ai-command').value.trim();
+            node.data.maxTokens = parseInt(modal.querySelector('#cfg-ai-max-tokens').value) || 16384;
+
+            node.data.name = `🤖 AI: ${filename}`;
+
+            this.render();
+            modal.remove();
+            if (window.showToast) window.showToast('AI Unit Test config saved', 'success');
+        };
+    }
+
+    async _runAIUnitTestNode(node) {
+        console.log('[AI Unit Test] Running node:', node.data.name);
+
+        const config = node.data;
+
+        // Validate: must have generated code
+        if (!config.generatedCode || config.generatedCode.trim() === '') {
+            if (window.showToast) window.showToast('No test code generated yet. Open config and generate tests first.', 'error');
+            return;
+        }
+
+        // Determine working directory
+        // Try to find a connected Git Repo node upstream to get the cloned repo path
+        let cwd = config.cwd;
+        if (!cwd) {
+            const incomingEdges = this.edges.filter(e => e.target === node.id);
+            for (const edge of incomingEdges) {
+                const sourceNode = this.nodes.find(n => n.id === edge.source);
+                if (sourceNode && sourceNode.type === 'git-repo' && sourceNode.data.clonedPath) {
+                    cwd = sourceNode.data.clonedPath;
+                    break;
+                }
+            }
+        }
+
+        if (!cwd) {
+            if (window.showToast) window.showToast('No working directory set. Connect a Git Repo node or set CWD in config.', 'error');
+            return;
+        }
+
+        try {
+            if (window.showToast) window.showToast('Injecting test file...', 'info');
+
+            // 1. Write the generated test file to the working directory
+            const testFilePath = cwd.replace(/\\/g, '/') + '/' + config.testFilename;
+            await window.electronAPI.fileOps.writeFile(testFilePath, config.generatedCode);
+            console.log('Test file written to:', testFilePath);
+
+            // 2. Execute the test command
+            if (window.showToast) window.showToast('Running AI-generated tests...', 'info');
+            const result = await window.electronAPI.sysOps.runCommand(cwd, config.command || `node ${config.testFilename}`);
+
+            console.log('Test Result:', result);
+
+            if (result.exitCode === 0) {
+                if (window.showToast) window.showToast(`AI Tests Passed.\n${result.stdout.slice(0, 200)}`, 'success');
+            } else {
+                if (window.showToast) window.showToast(`AI Tests Failed (exit code ${result.exitCode}):\n${(result.stderr || result.stdout).slice(0, 300)}`, 'error');
+            }
+
+            // Store result on node for graph engine context sharing
+            node.data.lastResult = {
+                exitCode: result.exitCode,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                timestamp: new Date().toISOString()
+            };
+
+        } catch (err) {
+            console.error('AI Unit Test execution error:', err);
+            if (window.showToast) window.showToast(`Execution Error: ${err.message}`, 'error');
+        }
     }
 
     zoom(delta) {
